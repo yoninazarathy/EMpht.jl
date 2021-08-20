@@ -80,7 +80,7 @@ MAPHObsData = Vector{SingleObs}
 
 #temp
 function very_crude_c_solver(y::Float64,i::Int,j::Int,maph::MAPHDist)
-    quadgk(u -> (maph.α*exp(maph.T*u))[i]*exp(maph.T*(y-u))*maph.T[:,j] , 0, y, rtol=1e-8) |> first
+    quadgk(u -> (maph.α*exp(maph.T*u))[i]*exp(maph.T*(y-u))*maph.T0[:,j] , 0, y, rtol=1e-8) |> first
 end
 
 function update_sufficient_stats(maph::MAPHDist, data::MAPHObsData, stats::MAPHSufficientStats, c_solver = very_crude_c_solver)
@@ -115,8 +115,6 @@ function update_sufficient_stats(maph::MAPHDist, data::MAPHObsData, stats::MAPHS
 
     stats.Z = [sum([EZ(3.5,i,j) for j =1:q]) for i = 1:p]
 
-    V = [maph.T[1,:].*c(3.5,1,j)*PA[j]/(maph.α*b(3.5,j)) for j in 1:q]
-
     for i= 1:p
         V = sum([ENT(3.5,i,j) for j in 1:q])
         for k = q+1:q+p
@@ -129,25 +127,22 @@ function update_sufficient_stats(maph::MAPHDist, data::MAPHObsData, stats::MAPHS
 
     end
 
-   
-
-    # @show EB(3.3,1,1),
     @show stats.N
 end
 
-mutable struct ProbabilityMatrix
-    P::Matrix{Float64} # transient to transient
-    P0::Matrix{Float64}#transient to absorbing
-    function ProbabilityMatrix(maph::MAPHDist)
-        p, q = model_size(maph)
-        new(zeros(p,p), zeros(p,q))
-    end
-end
+# mutable struct ProbabilityMatrix
+#     P::Matrix{Float64} # transient to transient
+#     P0::Matrix{Float64}#transient to absorbing
+#     function ProbabilityMatrix(maph::MAPHDist)
+#         p, q = model_size(maph)
+#         new(zeros(p,p), zeros(p,q))
+#     end
+# end
 
-function update_probability_matrix(maph::MAPHDist, probmatrix::ProbabilityMatrix)
-    probmatrix.P = I-inv(Diagonal(maph.T))*maph.T
-    probmatrix.P0 = -inv(Diagonal(maph.T))*maph.T0
-end
+# function update_probability_matrix(maph::MAPHDist, probmatrix::ProbabilityMatrix)
+#     probmatrix.P = I-inv(Diagonal(maph.T))*maph.T
+#     probmatrix.P0 = -inv(Diagonal(maph.T))*maph.T0
+# end
 
 
 function test_example()
@@ -157,14 +152,16 @@ function test_example()
     T0_example = [μ41 μ42 μ43; μ51 μ52 μ53]
 
     maph = MAPHDist([0.5,0.5]',T_example, T0_example)
+    stats = MAPHSufficientStats(maph)
     # @show maph
-    probmatrix = ProbabilityMatrix(maph)
     # @show model_size(maph)
-    # @show MAPHSufficientStats(maph)
 
     data = [(y=2.3,a=2),(y=5.32,a=1),(y=15.32,a=2)]
-    # update_sufficient_stats(maph, data)
-    # update_probability_matrix(maph,probmatrix)
+    # update_sufficient_stats(maph, data,stats)
+
+    @show stats
+
+    update_sufficient_stats(maph,data,stats)
 
     for _ in 1:10
         times, states = rand(maph, full_trace = true) 
@@ -173,5 +170,5 @@ function test_example()
 
 end
 
-test_example();
+test_example()
 
