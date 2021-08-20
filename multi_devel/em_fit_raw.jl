@@ -1,4 +1,5 @@
-using LinearAlgebra, QuadGK
+using LinearAlgebra, QuadGK, StatsBase, Distributions
+import Base: rand
 
 mutable struct MAPHDist
     α::Adjoint{Float64, Vector{Float64}}
@@ -6,20 +7,67 @@ mutable struct MAPHDist
     T0::Matrix{Float64}
 end
 
-# function doobGillespie(Q::Matrix{Float64},init_p::Vector{Float64},absorbing_states::Set{Int64})
-#     n = size(Q)[1]
-#     Pjump  = (Q-diagm(0 => diag(Q)))./-diag(Q)
-#     lamVec = -diag(Q)
-#     state  = sample(1:n,weights(initProb))
-#     sojournTime = rand(Exponential(1/lamVec[state]))
-#     t = 0.0
-#     while t + sojournTime < T
-#         t += sojournTime
-#         state = sample(1:n,weights(Pjump[state,:]))
-#         sojournTime = rand(Exponential(1/lamVec[state]))
-#     end
-#     return state
-# end
+function q_matrix(d::MAPHDist)::Matrix{Float64}
+    p, q = model_size(d)
+    return [zeros(q,p) zeros(q,q) ; d.T0 d.T]
+end
+
+function p_matrix(d::MAPHDist)::Matrix{Float64}
+    p, q = model_size(d)
+    PT = I-inv(Diagonal(d.T))*d.T
+    PT0 = -inv(Diagonal(d.T))*d.T0
+    return [I zeros(q,p); PT0 PT]
+end
+
+function rand(d::MAPHDist; full_trace = false)
+    p, q = model_size(d)
+    transient_states = (q+1):(q+p)
+    all_states = 1:(q+p)
+    Pjump = p_matrix(d)
+    Λ = vcat(zeros(q), -diag(d.T))
+
+    if full_trace
+        states = Int[]
+        sojourn_times = Float64[]
+    end
+
+    state = sample(transient_states,weights(d.α)) #initial state
+    t = 0.0
+    while state ∈ transient_states
+        sojourn_time = rand(Exponential(1/Λ[state]))
+        if full_trace
+            push!(states,state)
+            push!(sojourn_times,sojourn_time)
+        end
+        t += sojourn_time
+        state = sample(all_states,weights(Pjump[state,:]))
+    end
+
+    if full_trace
+        push!(states,state)
+        return (sojourn_times, states)
+    else
+        return (t, state)
+    end
+end
+
+
+mutable struct MAPHSufficientStats
+    B::Vector{Float64} #initial starts
+    Z::Vector{Float64} #time spent
+    N::Matrix{Float64} #transitions
+    function MAPHSufficientStats(maph::MAPHDist) 
+        p, q = model_size(maph)
+        new(zeros(p), zeros(p), zeros(p,p+q))
+    end
+end
+
+function sufficient_stat_from_trajectory(d::MAPHDist, sojourn_times::Array{Float64}, states::Array{Int})::MAPHSufficientStats
+    ss =  MAPHSufficientStats(d)
+    #QQQQ do stuff
+    return ss
+end
+
 
 
 model_size(maph::MAPHDist) = (p = size(maph.T,1), q = size(maph.T0,2)) #transient is p and abosrbing is q
@@ -28,26 +76,21 @@ SingleObs = NamedTuple{(:y, :a), Tuple{Float64, Int64}}
 
 MAPHObsData = Vector{SingleObs}
 
-mutable struct SufficientStats
-    B::Vector{Float64} #initial starts
-    Z::Vector{Float64} #time spent
-    N::Matrix{Float64} #transitions
-    function SufficientStats(maph::MAPHDist) 
-        p, q = model_size(maph)
-        new(zeros(p), zeros(p), zeros(p,p+q))
-    end
-end
+
 
 #temp
 function very_crude_c_solver(y::Float64,i::Int,j::Int,maph::MAPHDist)
     quadgk(u -> (maph.α*exp(maph.T*u))[i]*exp(maph.T*(y-u))*maph.T[:,j] , 0, y, rtol=1e-8) |> first
 end
 
-function update_sufficient_stats(maph::MAPHDist, data::MAPHObsData; c_solver = very_crude_c_solver)
+function update_sufficient_stats(maph::MAPHDist, data::MAPHObsData, stats::MAPHSufficientStats, c_solver = very_crude_c_solver)
+
     # @show maph
     # @show data
 
     #QQQQ - Here start to add code to update the sufficents stats
+
+    p,q = model_size(maph)
 
     a(y::Float64) = maph.α*exp(maph.T*y)
     b(y::Float64,j::Int) = exp(maph.T*y)*maph.T0[:,j]
@@ -55,9 +98,41 @@ function update_sufficient_stats(maph::MAPHDist, data::MAPHObsData; c_solver = v
     # @show a(3.3)
     # @show b(3.3,1)
     # @show c(3.3,1,2)
+    D = Diagonal(maph.T)
+    PT = I-inv(Diagonal(maph.T))*maph.T
+    PT0 = -inv(Diagonal(maph.T))*maph.T0
+    A = inv(I-PT)*PT0
+    PA = maph.α*A
+    EB(y::Float64, i::Int, j::Int) = maph.α[i] * b(y,j)[i]*PA[j]/ (maph.α*b(y,j))
 
-    EB(y::Float64, i::Int, j::Int) = maph.α[i] * b(y,j)[i] / (maph.α*b(y,j))
-    @show EB(3.3,1,1)
+    EZ(y::Float64, i::Int, j::Int) = c(y,i,j)[i]*PA[j]/(maph.α*b(y,j))
+
+    ENT(y::Float64,i::Int,j::Int) = maph.T[i,:].*c(y,i,j)*PA[j]/(maph.α*b(y,j))
+
+    ENA(y::Float64,i::Int,j::Int) = a(y)[i].*maph.T0[i,j]/(maph.α*b(y,j))
+
+    stats.B = [sum([EB(3.5, i, j) for j = 1:q]) for i =1:p]
+
+    stats.Z = [sum([EZ(3.5,i,j) for j =1:q]) for i = 1:p]
+
+    V = [maph.T[1,:].*c(3.5,1,j)*PA[j]/(maph.α*b(3.5,j)) for j in 1:q]
+
+    for i= 1:p
+        V = sum([ENT(3.5,i,j) for j in 1:q])
+        for k = q+1:q+p
+            stats.N[i,k] = V[k-q]
+        end
+
+        for j = 1:q
+            stats.N[i,j] = ENA(3.5,i,j)
+        end
+
+    end
+
+   
+
+    # @show EB(3.3,1,1),
+    @show stats.N
 end
 
 mutable struct ProbabilityMatrix
@@ -76,7 +151,7 @@ end
 
 
 function test_example()
-    Λ₄, λ45, λ54, Λ₅ = 3, 2, 7, 10
+    Λ₄, λ45, λ54, Λ₅ = 5, 2, 7, 10
     μ41, μ42, μ43, μ51, μ52, μ53 = 1, 1, 1, 1, 1, 1 
     T_example = [-Λ₄ λ45; λ54 -Λ₅]
     T0_example = [μ41 μ42 μ43; μ51 μ52 μ53]
@@ -85,11 +160,17 @@ function test_example()
     # @show maph
     probmatrix = ProbabilityMatrix(maph)
     # @show model_size(maph)
-    # @show SufficientStats(maph)
+    # @show MAPHSufficientStats(maph)
 
     data = [(y=2.3,a=2),(y=5.32,a=1),(y=15.32,a=2)]
-    update_sufficient_stats(maph, data)
-    update_probability_matrix(maph,probmatrix)
+    # update_sufficient_stats(maph, data)
+    # update_probability_matrix(maph,probmatrix)
+
+    for _ in 1:10
+        times, states = rand(maph, full_trace = true) 
+        ss = sufficient_stat_from_trajectory(maph,times,states)
+    end
+
 end
 
 test_example();
