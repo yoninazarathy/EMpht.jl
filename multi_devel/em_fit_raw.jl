@@ -63,7 +63,25 @@ mutable struct MAPHSufficientStats
 end
 
 function sufficient_stat_from_trajectory(d::MAPHDist, sojourn_times::Array{Float64}, states::Array{Int})::MAPHSufficientStats
+    p,q = model_size(d)
+    transient_states = (q+1):(q+p)
+
+    
     ss =  MAPHSufficientStats(d)
+
+    for s = 1:p
+        if states[1] == transient_states[s]
+            ss.B[s] +=1
+        end
+    end
+
+    for i = 1:(length(states)-1)
+        ss.Z[states[i]-q] += sojourn_times[i]
+        ss.N[states[i]-q, states[i+1]] += 1
+    end
+
+
+
     #QQQQ do stuff
     return ss
 end
@@ -75,7 +93,6 @@ model_size(maph::MAPHDist) = (p = size(maph.T,1), q = size(maph.T0,2)) #transien
 SingleObs = NamedTuple{(:y, :a), Tuple{Float64, Int64}}
 
 MAPHObsData = Vector{SingleObs}
-
 
 
 #temp
@@ -127,7 +144,6 @@ function update_sufficient_stats(maph::MAPHDist, data::MAPHObsData, stats::MAPHS
 
     end
 
-    @show stats.N
 end
 
 # mutable struct ProbabilityMatrix
@@ -145,6 +161,7 @@ end
 # end
 
 
+
 function test_example()
     Λ₄, λ45, λ54, Λ₅ = 5, 2, 7, 10
     μ41, μ42, μ43, μ51, μ52, μ53 = 1, 1, 1, 1, 1, 1 
@@ -159,14 +176,27 @@ function test_example()
     data = [(y=2.3,a=2),(y=5.32,a=1),(y=15.32,a=2)]
     # update_sufficient_stats(maph, data,stats)
 
-    @show stats
+    # @show stats
 
     update_sufficient_stats(maph,data,stats)
 
-    for _ in 1:10
+    test_stats = MAPHSufficientStats(maph)
+
+    for _ in 1:1000
         times, states = rand(maph, full_trace = true) 
         ss = sufficient_stat_from_trajectory(maph,times,states)
+        test_stats.N += ss.N
+        test_stats.Z += ss.Z
+        test_stats.B += ss.B
     end
+
+    test_stats.B = test_stats.B/sum(test_stats.B)
+    test_stats.Z = test_stats.Z/sum(test_stats.Z)
+    test_stats.N = test_stats.N/sum(test_stats.N)
+
+    @show(stats.N,test_stats.N)
+    
+
 
 end
 
