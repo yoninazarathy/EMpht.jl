@@ -1,5 +1,5 @@
-using LinearAlgebra, QuadGK, StatsBase, Distributions
-import Base: rand
+using LinearAlgebra, QuadGK, StatsBase, Distributions, Statistics
+import Base: rand, +, /
 
 mutable struct MAPHDist
     α::Adjoint{Float64, Vector{Float64}}
@@ -51,16 +51,25 @@ function rand(d::MAPHDist; full_trace = false)
     end
 end
 
+"""
+Create a named tuple observation.
+"""
+observation_from_full_traj(times::Vector{Float64}, states::Vector{Int64}) = (y = sum(times),a = last(states))
+
 
 mutable struct MAPHSufficientStats
     B::Vector{Float64} #initial starts
     Z::Vector{Float64} #time spent
     N::Matrix{Float64} #transitions
+    MAPHSufficientStats(B::Vector{Float64}, Z::Vector{Float64}, N::Matrix{Float64}) = new(B,Z,N)
     function MAPHSufficientStats(maph::MAPHDist) 
         p, q = model_size(maph)
         new(zeros(p), zeros(p), zeros(p,p+q))
     end
 end
+
++(ss1::MAPHSufficientStats, ss2::MAPHSufficientStats) = MAPHSufficientStats(ss1.B+ss2.B, ss1.Z+ss2.Z, ss1.N+ ss2.N)
+/(ss::MAPHSufficientStats,n::Real) = MAPHSufficientStats(ss.B/n,ss.Z/n,ss.N/n)
 
 function sufficient_stat_from_trajectory(d::MAPHDist, sojourn_times::Array{Float64}, states::Array{Int})::MAPHSufficientStats
     p,q = model_size(d)
@@ -91,7 +100,6 @@ end
 model_size(maph::MAPHDist) = (p = size(maph.T,1), q = size(maph.T0,2)) #transient is p and abosrbing is q
 
 SingleObs = NamedTuple{(:y, :a), Tuple{Float64, Int64}}
-
 MAPHObsData = Vector{SingleObs}
 
 
@@ -100,51 +108,45 @@ function very_crude_c_solver(y::Float64,i::Int,j::Int,maph::MAPHDist)
     quadgk(u -> (maph.α*exp(maph.T*u))[i]*exp(maph.T*(y-u))*maph.T0[:,j] , 0, y, rtol=1e-8) |> first
 end
 
-function update_sufficient_stats(maph::MAPHDist, data::MAPHObsData, stats::MAPHSufficientStats, c_solver = very_crude_c_solver)
+function sufficient_stats(observation::SingleObs, maph::MAPHDist; c_solver = very_crude_c_solver)::MAPHSufficientStats
+    stats = MAPHSufficientStats(maph)
 
-    # @show maph
-    # @show data
-
-    #QQQQ - Here start to add code to update the sufficents stats
-
-    p,q = model_size(maph)
+    p, q = model_size(maph)
 
     a(y::Float64) = maph.α*exp(maph.T*y)
     b(y::Float64,j::Int) = exp(maph.T*y)*maph.T0[:,j]
     c(y::Float64,i::Int,j::Int) = very_crude_c_solver(y,i,j,maph)
-    # @show a(3.3)
-    # @show b(3.3,1)
-    # @show c(3.3,1,2)
+
     D = Diagonal(maph.T)
     PT = I-inv(Diagonal(maph.T))*maph.T
     PT0 = -inv(Diagonal(maph.T))*maph.T0
     A = inv(I-PT)*PT0
     PA = maph.α*A
+
     EB(y::Float64, i::Int, j::Int) = maph.α[i] * b(y,j)[i]*PA[j]/ (maph.α*b(y,j))
-
     EZ(y::Float64, i::Int, j::Int) = c(y,i,j)[i]*PA[j]/(maph.α*b(y,j))
-
-    ENT(y::Float64,i::Int,j::Int) = maph.T[i,:].*c(y,i,j)*PA[j]/(maph.α*b(y,j))
-
+    ENT(y::Float64,i::Int,j::Int) = i+q != j ?  maph.T[i,:].*c(y,i,j)*PA[j]/(maph.α*b(y,j)) : zeros(p)
     ENA(y::Float64,i::Int,j::Int) = a(y)[i].*maph.T0[i,j]/(maph.α*b(y,j))
 
-    stats.B = [sum([EB(3.5, i, j) for j = 1:q]) for i =1:p]
-
-    stats.Z = [sum([EZ(3.5,i,j) for j =1:q]) for i = 1:p]
+    stats.B = [sum([EB(observation.y, i, j) for j = 1:q]) for i =1:p]
+    stats.Z = [sum([EZ(observation.y,i,j) for j =1:q]) for i = 1:p]
 
     for i= 1:p
-        V = sum([ENT(3.5,i,j) for j in 1:q])
+        V = sum([ENT(observation.y,i,j) for j in 1:q])
         for k = q+1:q+p
             stats.N[i,k] = V[k-q]
         end
 
         for j = 1:q
-            stats.N[i,j] = ENA(3.5,i,j)
+            stats.N[i,j] = ENA(observation.y,i,j)
         end
-
     end
-
+    
+    return stats
 end
+
+sufficient_stats(data::MAPHObsData, maph::MAPHDist; c_solver = very_crude_c_solver)::MAPHSufficientStats = mean([sufficient_stats(d, maph) for d in data])
+
 
 # mutable struct ProbabilityMatrix
 #     P::Matrix{Float64} # transient to transient
@@ -178,13 +180,13 @@ function test_example()
 
     # @show stats
 
-    update_sufficient_stats(maph,data,stats)
+    # QQQQ update_sufficient_stats(maph,data,stats)
 
     test_stats = MAPHSufficientStats(maph)
 
-    for _ in 1:1000
+    for _ in 1:10^5
         times, states = rand(maph, full_trace = true) 
-        ss = sufficient_stat_from_trajectory(maph,times,states)
+        ss = sufficient_stat_from_trajectory(maph, times, states)
         test_stats.N += ss.N
         test_stats.Z += ss.Z
         test_stats.B += ss.B
@@ -194,11 +196,42 @@ function test_example()
     test_stats.Z = test_stats.Z/sum(test_stats.Z)
     test_stats.N = test_stats.N/sum(test_stats.N)
 
-    @show(stats.N,test_stats.N)
+    # @show(stats.N,test_stats.N)
     
-
-
+    @show stats.Z #- test_stats.N
+    @show test_stats.Z
 end
 
-test_example()
+# test_example()
 
+
+function test_example2()
+    Λ₄, λ45, λ54, Λ₅ = 5, 2, 7, 10
+    μ41, μ42, μ43, μ51, μ52, μ53 = 1, 1, 1, 1, 1, 1 
+    T_example = [-Λ₄ λ45; λ54 -Λ₅]
+    T0_example = [μ41 μ42 μ43; μ51 μ52 μ53]
+
+    maph = MAPHDist([0.5,0.5]',T_example, T0_example)
+   
+    data = SingleObs[]
+
+    for _ in 1:10^5
+        times, states = rand(maph, full_trace = true) 
+        push!(data,observation_from_full_traj(times,states))
+        # ss = sufficient_stat_from_trajectory(maph, times, states)
+        # test_stats.N += ss.N
+        # test_stats.Z += ss.Z
+        # test_stats.B += ss.B
+    end
+    # [d for d in data]
+    # [sufficient_stats(d, maph) for d in data]
+    # stats = MAPHSufficientStats(maph)
+    # update_sufficient_stats(maph,data
+    # data[1
+    data
+    # sufficient_stats(data,maph)
+end
+
+ret = test_example2()
+
+filter(ret) do obs obs.y ≥ 0.0 && obs.y < 0.005 && obs.a == 1 end 
