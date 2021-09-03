@@ -164,12 +164,16 @@ sufficient_stats(data::MAPHObsData, maph::MAPHDist; c_solver = very_crude_c_solv
 #     probmatrix.P0 = -inv(Diagonal(maph.T))*maph.T0
 # end
 
-function absorb_filter_data(data::MAPHObsData,maph::MAPHDist)
-    p,q = model_size(maph)
+
+"""
+Returns an array of data filtered according to absorbing state being the index of the array.
+"""
+function absorb_filter_data(data, maph::MAPHDist)
+    p, q = model_size(maph)
     filter_data = []
 
     for i = 1:q
-        temp_data = filter(data) do obs obs.a ==i end
+        temp_data = filter(data) do obs first(obs).a == i end
         push!(filter_data,temp_data)
     end    
     
@@ -177,20 +181,19 @@ function absorb_filter_data(data::MAPHObsData,maph::MAPHDist)
 end
 
 
-function time_filter_data(data::MAPHObsData,n::Int64)
+function time_filter_data(data, n::Int64)
 
-    max_time = maximum([data[i].y for i = 1:length(data)])
-    time_vec = Array(LinRange(0,max_time,n))
+    max_time = maximum(((d)->first(d).y).(data) )#[data[i].y for i = 1:length(data)])
+    time_vec = Array(LinRange(0, max_time, n)) #QQQQ - cleanup later
 
     filter_data = []
 
     for i = 1:(n-1)
-        temp_data = filter(data) do obs obs.y ≥ time_vec[i] && obs.y < time_vec[i+1] end 
+        temp_data = filter(data) do obs first(obs).y ≥ time_vec[i] && first(obs).y < time_vec[i+1] end 
         push!(filter_data,temp_data)
     end    
 
     return(filter_data)
-    
 end
 
 
@@ -243,16 +246,21 @@ function test_example2()
 
     maph = MAPHDist([0.5,0.5]',T_example, T0_example)
    
-    data = SingleObs[]
+    data = []
 
-    for _ in 1:10^5
+    full_trace =[]
+    
+
+    for i in 1:10^5
         times, states = rand(maph, full_trace = true) 
-        push!(data,observation_from_full_traj(times,states))
+        push!(full_trace,(times,states))
+        push!(data, (observation_from_full_traj(times,states),i))
         # ss = sufficient_stat_from_trajectory(maph, times, states)
         # test_stats.N += ss.N
         # test_stats.Z += ss.Z
         # test_stats.B += ss.B
     end
+
     # [d for d in data]
     # [sufficient_stats(d, maph) for d in data]
     # stats = MAPHSufficientStats(maph)
@@ -260,12 +268,28 @@ function test_example2()
     # data[1
     # sufficient_stats(data,maph)
     absorb = absorb_filter_data(data,maph)
-
-    # @show m[1]
-    # @show maximum([m[1][i].y for i = 1:length(m[1])])
     m = time_filter_data(absorb[1],1000)
 
-    @show m[1]
+    #loop over all bins
+    for i in 1:length(m)
+        ss_i = MAPHSufficientStats[]
+
+        for trace in full_trace[last.(m[i])]
+            ss = sufficient_stat_from_trajectory(maph, trace[1], trace[2])
+            push!(ss_i,ss)
+        end
+        if !isempty(ss_i)
+            mean_observed_ss = mean(ss_i)
+            obs = first(data[last(last.(m[i]))])
+            @show obs
+            computed_ss = sufficient_stats(obs,maph)
+            @show mean_observed_ss + computed_ss/(-1)
+            # sufficient_stats()
+        end
+    end
+
+    # @show first(data)
+    # # @show m[1]
     # @show maximum(data.y)
     # @show maximum[data[i].y for i = 1:length(data)]
 
