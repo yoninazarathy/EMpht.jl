@@ -103,6 +103,8 @@ SingleObs = NamedTuple{(:y, :a), Tuple{Float64, Int64}}
 MAPHObsData = Vector{SingleObs}
 
 
+
+
 #temp
 function very_crude_c_solver(y::Float64,i::Int,j::Int,maph::MAPHDist)
     quadgk(u -> (maph.α*exp(maph.T*u))[i]*exp(maph.T*(y-u))*maph.T0[:,j] , 0, y, rtol=1e-8) |> first
@@ -162,6 +164,34 @@ sufficient_stats(data::MAPHObsData, maph::MAPHDist; c_solver = very_crude_c_solv
 #     probmatrix.P0 = -inv(Diagonal(maph.T))*maph.T0
 # end
 
+function absorb_filter_data(data::MAPHObsData,maph::MAPHDist)
+    p,q = model_size(maph)
+    filter_data = []
+
+    for i = 1:q
+        temp_data = filter(data) do obs obs.a ==i end
+        push!(filter_data,temp_data)
+    end    
+    
+    return filter_data
+end
+
+
+function time_filter_data(data::MAPHObsData,n::Int64)
+
+    max_time = maximum([data[i].y for i = 1:length(data)])
+    time_vec = Array(LinRange(0,max_time,n))
+
+    filter_data = []
+
+    for i = 1:(n-1)
+        temp_data = filter(data) do obs obs.y ≥ time_vec[i] && obs.y < time_vec[i+1] end 
+        push!(filter_data,temp_data)
+    end    
+
+    return(filter_data)
+    
+end
 
 
 function test_example()
@@ -228,10 +258,26 @@ function test_example2()
     # stats = MAPHSufficientStats(maph)
     # update_sufficient_stats(maph,data
     # data[1
-    data
     # sufficient_stats(data,maph)
+    absorb = absorb_filter_data(data,maph)
+
+    # @show m[1]
+    # @show maximum([m[1][i].y for i = 1:length(m[1])])
+    m = time_filter_data(absorb[1],1000)
+
+    @show m[1]
+    # @show maximum(data.y)
+    # @show maximum[data[i].y for i = 1:length(data)]
+
+
+
 end
 
-ret = test_example2()
+test_example2();
 
-filter(ret) do obs obs.y ≥ 0.0 && obs.y < 0.005 && obs.a == 1 end 
+# filter(ret) do obs obs.y ≥ 0.0 && obs.y < 0.005 && obs.a == 1 end 
+
+# a = (filter(ret) do obs obs.a ==1 end);
+
+
+
