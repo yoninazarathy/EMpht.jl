@@ -75,7 +75,6 @@ function sufficient_stat_from_trajectory(d::MAPHDist, sojourn_times::Array{Float
     p,q = model_size(d)
     transient_states = (q+1):(q+p)
 
-    
     ss =  MAPHSufficientStats(d)
 
     for s = 1:p
@@ -230,12 +229,13 @@ function test_example()
     test_stats.N = test_stats.N/sum(test_stats.N)
 
     # @show(stats.N,test_stats.N)
-    
-    @show stats.Z #- test_stats.N
-    @show test_stats.Z
+    @show test_stats
 end
 
 # test_example()
+
+
+
 
 
 function test_example2()
@@ -251,7 +251,7 @@ function test_example2()
     full_trace =[]
     
 
-    for i in 1:10^5
+    for i in 1:10^3
         times, states = rand(maph, full_trace = true) 
         push!(full_trace,(times,states))
         push!(data, (observation_from_full_traj(times,states),i))
@@ -268,30 +268,54 @@ function test_example2()
     # data[1
     # sufficient_stats(data,maph)
     absorb = absorb_filter_data(data,maph)
-    m = time_filter_data(absorb[1],1000)
+    time_bin = time_filter_data(absorb[1],2)
+
 
     #loop over all bins
-    for i in 1:length(m)
+    for i in 1:length(time_bin)
         ss_i = MAPHSufficientStats[]
 
-        for trace in full_trace[last.(m[i])]
+        for trace in full_trace[last.(time_bin[i])]
             ss = sufficient_stat_from_trajectory(maph, trace[1], trace[2])
             push!(ss_i,ss)
+            iter = 0
+            while iter < 10
+                maph.α = adjoint(ss.B)
+                # maph.T0 = ss.N[:,]
+                maph.T0 = max.(ss.N[:,3:5]./ss.Z,0)
+                maph.T = max.(ss.N[:,1:2]./ss.Z,0)
+
+                maph.T[isnan.(maph.T)].=0
+                @show maph.T
+                iter +=1
+            end
+            
         end
+        
+    
+
+
+        
         if !isempty(ss_i)
             mean_observed_ss = mean(ss_i)
-            obs = first(data[last(last.(m[i]))])
-            @show obs
+            obs = first(data[last(last.(time_bin[i]))])
             computed_ss = sufficient_stats(obs,maph)
-            @show mean_observed_ss + computed_ss/(-1)
+            # @show mean_observed_ss + computed_ss/(-1)
+            # @show obs
             # sufficient_stats()
         end
     end
+
+
+
+
+
 
     # @show first(data)
     # # @show m[1]
     # @show maximum(data.y)
     # @show maximum[data[i].y for i = 1:length(data)]
+
 
 
 
