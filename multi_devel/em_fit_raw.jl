@@ -1,5 +1,5 @@
 using LinearAlgebra, QuadGK, StatsBase, Distributions, Statistics
-import Base: rand, +, /
+import Base: rand, +, /, -
 
 mutable struct MAPHDist
     α::Adjoint{Float64, Vector{Float64}}
@@ -70,6 +70,10 @@ end
 
 +(ss1::MAPHSufficientStats, ss2::MAPHSufficientStats) = MAPHSufficientStats(ss1.B+ss2.B, ss1.Z+ss2.Z, ss1.N+ ss2.N)
 /(ss::MAPHSufficientStats,n::Real) = MAPHSufficientStats(ss.B/n,ss.Z/n,ss.N/n)
+/(ss1::MAPHSufficientStats,ss2::MAPHSufficientStats) = MAPHSufficientStats(ss1.B ./ ss2.B, ss1.Z ./  ss2.Z, ss1.N ./  ss2.N)
+-(ss1::MAPHSufficientStats, ss2::MAPHSufficientStats) = MAPHSufficientStats(ss1.B-ss2.B, ss1.Z-ss2.Z, ss1.N - ss2.N)
+
+
 
 function sufficient_stat_from_trajectory(d::MAPHDist, sojourn_times::Array{Float64}, states::Array{Int})::MAPHSufficientStats
     p,q = model_size(d)
@@ -279,16 +283,16 @@ function test_example2()
             ss = sufficient_stat_from_trajectory(maph, trace[1], trace[2])
             push!(ss_i,ss)
             iter = 0
-            while iter < 10
-                maph.α = adjoint(ss.B)
-                # maph.T0 = ss.N[:,]
-                maph.T0 = max.(ss.N[:,3:5]./ss.Z,0)
-                maph.T = max.(ss.N[:,1:2]./ss.Z,0)
+            # while iter < 10
+            #     maph.α = adjoint(ss.B)
+            #     # maph.T0 = ss.N[:,]
+            #     maph.T0 = max.(ss.N[:,3:5]./ss.Z,0)
+            #     maph.T = max.(ss.N[:,1:2]./ss.Z,0)
 
-                maph.T[isnan.(maph.T)].=0
-                @show maph.T
-                iter +=1
-            end
+            #     maph.T[isnan.(maph.T)].=0
+            #     @show maph.T
+            #     iter +=1
+            # end
             
         end
         
@@ -300,8 +304,9 @@ function test_example2()
             mean_observed_ss = mean(ss_i)
             obs = first(data[last(last.(time_bin[i]))])
             computed_ss = sufficient_stats(obs,maph)
-            # @show mean_observed_ss + computed_ss/(-1)
-            # @show obs
+            # @show computed_ss
+            @show (mean_observed_ss - computed_ss)/computed_ss #./ computed_ss
+            @show obs
             # sufficient_stats()
         end
     end
@@ -321,11 +326,32 @@ function test_example2()
 
 end
 
-test_example2();
+# test_example2();
 
 # filter(ret) do obs obs.y ≥ 0.0 && obs.y < 0.005 && obs.a == 1 end 
 
 # a = (filter(ret) do obs obs.a ==1 end);
 
 
+#QQQQ - An example with a deterministic path....
+function test_example3()
+    
+    ϵ = 0.00000001
 
+    T_example = [-(1.0+4ϵ) 1.0 ϵ 
+                ϵ -(1.0 + 4ϵ) 1.0
+                ϵ ϵ -(1 + 4ϵ) ]
+
+    T0_example = [ϵ ϵ ϵ; 
+                  ϵ ϵ ϵ;
+                  1.0 ϵ ϵ]
+
+    maph = MAPHDist([1.0,0.0, 0.0]',T_example, T0_example)
+
+    obs = (y=22.0, a=1)
+    sufficient_stats(obs, maph)
+end
+
+ss = test_example3()
+
+ss.N
