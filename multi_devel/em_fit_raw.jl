@@ -344,7 +344,7 @@ function test_example3()
 
     T0_example = [ϵ ϵ ϵ; 
                   ϵ ϵ ϵ;
-                  2.0 ϵ ϵ]
+                  3.0 ϵ ϵ]
 
     maph = MAPHDist([1.0,0.0, 0.0]',T_example, T0_example)
 
