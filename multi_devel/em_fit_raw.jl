@@ -128,24 +128,57 @@ function sufficient_stats(observation::SingleObs, maph::MAPHDist; c_solver = ver
     A = inv(I-PT)*PT0
     PA = maph.α*A
 
+
+    # display(PT)
+    # display(PT0)
+    # display(PA)
+    # display(sum(PA))
+
+
     EB(y::Float64, i::Int, j::Int) = maph.α[i] * b(y,j)[i]*PA[j]/ (maph.α*b(y,j))
     EZ(y::Float64, i::Int, j::Int) = c(y,i,j)[i]*PA[j]/(maph.α*b(y,j))
-    ENT(y::Float64,i::Int,j::Int) = i+q != j ?  maph.T[i,:].*c(y,i,j)*PA[j]/(maph.α*b(y,j)) : zeros(p)
-    ENA(y::Float64,i::Int,j::Int) = a(y)[i].*maph.T0[i,j]/(maph.α*b(y,j))
+    # ENT(y::Float64,i::Int,j::Int) = i+q != j ?  maph.T[i,:].*c(y,i,j)*PA[j]/(maph.α*b(y,j)) : zeros(p)
+    # ENT2(y::Float64,i::Int,j::Int) =  maph.T[i,:].*c(y,i,j)*PA[j]/(maph.α*b(y,j))
+
+    ENT(y::Float64,i::Int,k::Int,j::Int) = i !=k ? maph.T[i,:].*c(y,i,j)*PA[j]/(maph.α*b(y,j)) : zeros(p)
+
+    # ENA(y::Float64,i::Int,j::Int) = a(y)[i]*maph.T0[:,j][i]/(maph.α*b(y,j))
+    ENA(y::Float64,i::Int,j::Int) = PA[j]*a(y)[i]*maph.T0[i,j]/(maph.α*b(y,j))
+
+
 
     stats.B = [sum([EB(observation.y, i, j) for j = 1:q]) for i =1:p]
     stats.Z = [sum([EZ(observation.y,i,j) for j =1:q]) for i = 1:p]
 
-    for i= 1:p
-        V = sum([ENT(observation.y,i,j) for j in 1:q])
-        for k = q+1:q+p
+
+    for i = 1:p
+        for k = (q+1):(q+p)
+            V = sum([ENT(observation.y,i,k-q,j) for j in 1:q])
             stats.N[i,k] = V[k-q]
         end
 
+   
         for j = 1:q
             stats.N[i,j] = ENA(observation.y,i,j)
         end
+
+
     end
+
+
+
+
+
+    # for i= 1:p
+    #     V = sum([ENT(observation.y,i,j) for j in 1:q])
+    #     for k = q+1:q+p
+    #         stats.N[i,k] = V[k-q]
+    #     end
+
+    #     for j = 1:q
+    #         stats.N[i,j] = ENA(observation.y,i,j)
+    #     end
+    # end
     
     return stats
 end
@@ -338,20 +371,28 @@ function test_example3()
     
     ϵ = 0.00000001
 
-    T_example = [-(1.0+4ϵ) 1.0 ϵ 
-                ϵ -(1.0 + 4ϵ) 1.0
+    T_example = [-(1.0+4ϵ) 1.0-4ϵ ϵ 
+                ϵ -(1.0 + 4ϵ) 1.0-4ϵ
                 ϵ ϵ -(1 + 4ϵ) ]
 
     T0_example = [ϵ ϵ ϵ; 
                   ϵ ϵ ϵ;
-                  3.0 ϵ ϵ]
+                  1-4ϵ ϵ ϵ]
 
-    maph = MAPHDist([1.0,0.0, 0.0]',T_example, T0_example)
+    
+    T_example2 = [-(1.0+3ϵ) 1.0 ϵ
+                 ϵ -(1.0+3ϵ) 1.0
+                 ϵ ϵ -(1+3ϵ)]
+    T0_example2 = [ϵ ϵ;
+                   ϵ ϵ;
+                   1-3ϵ ϵ]   
 
-    obs = (y=22.0, a=1)
+    display(sum(T0_example2[:,1]))
+    maph = MAPHDist([0.5,0.5, 0.0]',T_example, T0_example)
+
+    obs = (y=100.0, a=2)
     sufficient_stats(obs, maph)
 end
 
 ss = test_example3()
 
-ss.N
