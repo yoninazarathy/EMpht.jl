@@ -1,11 +1,22 @@
 using LinearAlgebra, QuadGK, StatsBase, Distributions, Statistics
 import Base: rand, +, /, -
+import Distributions: cdf, ccdf
 
 mutable struct MAPHDist
     α::Adjoint{Float64, Vector{Float64}}
     T::Matrix{Float64}
     T0::Matrix{Float64}
 end
+
+MAPHDist(;p::Int=1,q::Int=1) = MAPHDist(
+                        Vector{Float64}(undef,p)', 
+                        Matrix{Float64}(undef,p,p), 
+                        Matrix{Float64}(undef,p,q)) 
+
+
+# ccdf(maph::MAPHDist, y::Float64, a::Int) = exp(maph.α*maph.T*y) 
+# cdf = 1-ccdf
+# V_j///
 
 function q_matrix(d::MAPHDist)::Matrix{Float64}
     p, q = model_size(d)
@@ -47,7 +58,7 @@ function rand(d::MAPHDist; full_trace = false)
         push!(states,state)
         return (sojourn_times, states)
     else
-        return (t, state)
+        return (y = t, a = state)
     end
 end
 
@@ -55,7 +66,6 @@ end
 Create a named tuple observation.
 """
 observation_from_full_traj(times::Vector{Float64}, states::Vector{Int64}) = (y = sum(times),a = last(states))
-
 
 mutable struct MAPHSufficientStats
     B::Vector{Float64} #initial starts
@@ -145,8 +155,6 @@ function sufficient_stats(observation::SingleObs, maph::MAPHDist; c_solver = ver
     # ENA(y::Float64,i::Int,j::Int) = a(y)[i]*maph.T0[:,j][i]/(maph.α*b(y,j))
     ENA(y::Float64,i::Int,j::Int) = PA[j]*a(y)[i]*maph.T0[i,j]/(maph.α*b(y,j))
 
-
-
     stats.B = [sum([EB(observation.y, i, j) for j = 1:q]) for i =1:p]
     stats.Z = [sum([EZ(observation.y,i,j) for j =1:q]) for i = 1:p]
 
@@ -161,7 +169,6 @@ function sufficient_stats(observation::SingleObs, maph::MAPHDist; c_solver = ver
         for j = 1:q
             stats.N[i,j] = ENA(observation.y,i,j)
         end
-
 
     end
 
@@ -199,6 +206,23 @@ sufficient_stats(data::MAPHObsData, maph::MAPHDist; c_solver = very_crude_c_solv
 #     probmatrix.P = I-inv(Diagonal(maph.T))*maph.T
 #     probmatrix.P0 = -inv(Diagonal(maph.T))*maph.T0
 # end
+
+
+"""
+Fits ... QQQQ
+"""
+function fit!(maph::MAPHDist,data::MAPHObsData)::MAPHDist
+    #EM Loop
+
+    for i in 1:3
+        ss = sufficient_stats(data,maph)
+        @show ss
+        #QQQQ - do EM steps here...
+    end
+
+    return maph
+end
+
 
 
 """
@@ -271,92 +295,52 @@ end
 
 # test_example()
 
-
-
-
-
 function test_example2()
     Λ₄, λ45, λ54, Λ₅ = 5, 2, 7, 10
     μ41, μ42, μ43, μ51, μ52, μ53 = 1, 1, 1, 1, 1, 1 
     T_example = [-Λ₄ λ45; λ54 -Λ₅]
     T0_example = [μ41 μ42 μ43; μ51 μ52 μ53]
 
-    maph = MAPHDist([0.5,0.5]',T_example, T0_example)
+    maph = MAPHDist([0.5,0.5]', T_example, T0_example)
    
     data = []
-
     full_trace =[]
     
-
-    for i in 1:10^3
+    println("starting simulations")
+    for i in 1:2*10^6
         times, states = rand(maph, full_trace = true) 
-        push!(full_trace,(times,states))
+        push!(full_trace, (times,states))
         push!(data, (observation_from_full_traj(times,states),i))
-        # ss = sufficient_stat_from_trajectory(maph, times, states)
-        # test_stats.N += ss.N
-        # test_stats.Z += ss.Z
-        # test_stats.B += ss.B
+        i % 10^5 == 0 && print(".")
     end
+    println("\nfinished simulations")
 
-    # [d for d in data]
-    # [sufficient_stats(d, maph) for d in data]
-    # stats = MAPHSufficientStats(maph)
-    # update_sufficient_stats(maph,data
-    # data[1
-    # sufficient_stats(data,maph)
-    absorb = absorb_filter_data(data,maph)
-    time_bin = time_filter_data(absorb[1],2)
-
+    absorb = absorb_filter_data(data, maph)
+    time_bin = time_filter_data(absorb[1], 1000)
 
     #loop over all bins
+    println("\n binning...")
     for i in 1:length(time_bin)
         ss_i = MAPHSufficientStats[]
-
         for trace in full_trace[last.(time_bin[i])]
             ss = sufficient_stat_from_trajectory(maph, trace[1], trace[2])
-            push!(ss_i,ss)
-            iter = 0
-            # while iter < 10
-            #     maph.α = adjoint(ss.B)
-            #     # maph.T0 = ss.N[:,]
-            #     maph.T0 = max.(ss.N[:,3:5]./ss.Z,0)
-            #     maph.T = max.(ss.N[:,1:2]./ss.Z,0)
-
-            #     maph.T[isnan.(maph.T)].=0
-            #     @show maph.T
-            #     iter +=1
-            # end
-            
+            push!(ss_i, ss)
         end
-        
-    
-
-
         
         if !isempty(ss_i)
             mean_observed_ss = mean(ss_i)
             obs = first(data[last(last.(time_bin[i]))])
-            computed_ss = sufficient_stats(obs,maph)
-            # @show computed_ss
-            @show (mean_observed_ss - computed_ss)/computed_ss #./ computed_ss
-            @show obs
+            computed_ss = sufficient_stats(obs, maph)
+            errs_N = (mean_observed_ss.N - computed_ss.N) ./ computed_ss.N #./ computed_ss
+            @show (errs_N[2,4], length(ss_i))
+            # @show obs
             # sufficient_stats()
         end
     end
-
-
-
-
-
-
     # @show first(data)
     # # @show m[1]
     # @show maximum(data.y)
     # @show maximum[data[i].y for i = 1:length(data)]
-
-
-
-
 end
 
 # test_example2();
@@ -394,5 +378,31 @@ function test_example3()
     sufficient_stats(obs, maph)
 end
 
-ss = test_example3()
+# ss = test_example2()
+
+
+
+function test_example4()
+    Λ₄, λ45, λ54, Λ₅ = 5, 2, 7, 10
+    μ41, μ42, μ43, μ51, μ52, μ53 = 1, 1, 1, 1, 1, 1 
+    T_example = [-Λ₄ λ45; λ54 -Λ₅]
+    T0_example = [μ41 μ42 μ43; μ51 μ52 μ53]
+
+    maph = MAPHDist([0.5,0.5]', T_example, T0_example)
+
+    println("starting simulations")
+    data = [rand(maph) for i in 1:10^2]
+    println("\nfinished simulations")
+    
+    est_maph = MAPHDist(;model_size(maph)...)
+    @assert model_size(est_maph) == model_size(maph)
+
+    #fit! gets an MAPHDist object for two possible reasons:
+        #Reason #1 (always) - to know p and q.
+        #Reason #2 (sometimes) - to have a starting guess. QQQQ - later give it a flag to say 
+    fit!(est_maph,data)
+end
+
+test_example4()
+
 
