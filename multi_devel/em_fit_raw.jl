@@ -8,10 +8,26 @@ mutable struct MAPHDist
     T0::Matrix{Float64}
 end
 
-MAPHDist(;p::Int=1,q::Int=1) = MAPHDist(
-                        Vector{Float64}(undef,p)', 
-                        Matrix{Float64}(undef,p,p), 
-                        Matrix{Float64}(undef,p,q)) 
+function MAPHInit(p::Int=1,q::Int=1)
+    α = rand(p)
+    α = (α/sum(α))'
+    T = rand(1:0.01:20,p,p)
+    T0 = rand(1:0.01:20,p,q)
+    for i = 1:p
+        temp = T[i,i]
+        T[i,i]= -sum(T[i,:])-sum(T0[i,:])+temp
+    end
+    return MAPHDist(α,T,T0)
+end
+
+ss = MAPHInit(3,3)
+# MAPHDist(;p::Int=1,q::Int=1) = MAPHInit(p::Int=1,q::Int=1)
+# MAPHDist(;p::Int=1,q::Int=1) = MAPHDist(
+#                         Vector{Float64}(undef,p)', 
+#                         Matrix{Float64}(undef,p,p), 
+#                         Matrix{Float64}(undef,p,q)) 
+
+
 
 
 # ccdf(maph::MAPHDist, y::Float64, a::Int) = exp(maph.α*maph.T*y) 
@@ -393,8 +409,11 @@ function test_example4()
     println("starting simulations")
     data = [rand(maph) for i in 1:10^2]
     println("\nfinished simulations")
-    
-    est_maph = MAPHDist(;model_size(maph)...)
+
+    p,q = model_size(maph)
+    est_maph = MAPHInit(p,q)
+    # est_maph = MAPHDist(;model_size(maph)...)
+    display(est_maph)
     @assert model_size(est_maph) == model_size(maph)
 
     #fit! gets an MAPHDist object for two possible reasons:
@@ -403,6 +422,6 @@ function test_example4()
     fit!(est_maph,data)
 end
 
-test_example4()
+ss=test_example4()
 
 
