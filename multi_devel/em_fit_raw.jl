@@ -20,7 +20,6 @@ function MAPHInit(p::Int=1,q::Int=1)
     return MAPHDist(α,T,T0)
 end
 
-ss = MAPHInit(3,3)
 # MAPHDist(;p::Int=1,q::Int=1) = MAPHInit(p::Int=1,q::Int=1)
 # MAPHDist(;p::Int=1,q::Int=1) = MAPHDist(
 #                         Vector{Float64}(undef,p)', 
@@ -223,18 +222,38 @@ sufficient_stats(data::MAPHObsData, maph::MAPHDist; c_solver = very_crude_c_solv
 #     probmatrix.P0 = -inv(Diagonal(maph.T))*maph.T0
 # end
 
-
+function stats_to_dist(maph::MAPHDist,ss::MAPHSufficientStats)::MAPHDist
+    p,q = model_size(maph)
+    α = ss.B'
+    T = ss.N[:,(q+1):(q+p)]./ss.Z
+    T0 = ss.N[:,1:q]./ss.Z
+    for i = 1:p
+        temp = T[i,i]
+        T[i,i]= -sum(T[i,:])-sum(T0[i,:])+temp
+    end
+    return MAPHDist(α,T,T0)
+end
 """
 Fits ... QQQQ
 """
 function fit!(maph::MAPHDist,data::MAPHObsData)::MAPHDist
     #EM Loop
 
-    for i in 1:3
-        ss = sufficient_stats(data,maph)
-        @show ss
-        #QQQQ - do EM steps here...
+    p,q = model_size(maph)
+
+
+    for k in 1:100
+        ss = sufficient_stats(data[1],maph)
+        for i in 2:10^2
+            ss = ss+sufficient_stats(data[i],maph)
+        end
+        ss = ss/10^2
+        
+        display(ss.B)
+        maph = stats_to_dist(maph,ss)
+
     end
+
 
     return maph
 end
@@ -410,10 +429,10 @@ function test_example4()
     data = [rand(maph) for i in 1:10^2]
     println("\nfinished simulations")
 
+
     p,q = model_size(maph)
     est_maph = MAPHInit(p,q)
     # est_maph = MAPHDist(;model_size(maph)...)
-    display(est_maph)
     @assert model_size(est_maph) == model_size(maph)
 
     #fit! gets an MAPHDist object for two possible reasons:
