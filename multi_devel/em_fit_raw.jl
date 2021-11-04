@@ -2,23 +2,118 @@ using LinearAlgebra, QuadGK, StatsBase, Distributions, Statistics
 import Base: rand, +, /, -
 import Distributions: cdf, ccdf
 
+
+
+
+
 mutable struct MAPHDist
     α::Adjoint{Float64, Vector{Float64}}
     T::Matrix{Float64}
     T0::Matrix{Float64}
 end
 
-function MAPHInit(p::Int=1,q::Int=1)
-    α = rand(p)
-    α = (α/sum(α))'
-    T = rand(1:0.01:20,p,p)
-    T0 = rand(1:0.01:20,p,q)
-    for i = 1:p
-        temp = T[i,i]
-        T[i,i]= -sum(T[i,:])-sum(T0[i,:])+temp
-    end
-    return MAPHDist(α,T,T0)
+"""
+
+Returns parameters of a two phase hyper-exponential fitting a mean and an SCV
+
+"""
+
+function hyper_exp_fit(scv::Float64)
+
+    scv < 1.0 && error("SCV must be greater than 1")
+    μ1 = 1/(scv+1)
+    p = (scv-1)/(scv+1+2/μ1^2-4/μ1)
+    μ2 = 2*(1-μ1)/(2-μ1*(scv+1))
+    α = zeros(2)'
+    α[1] = 1-p
+    α[2] = p
+
+    T = zeros(2,2)
+    T[1,1] = -1/μ1
+    T[2,2] = -(1-p)/(1-2*p)
+
+    return (α,T)
+
 end
+
+ 
+
+"""
+
+Returns parameters of a hypo-exponential (generalized erlang) dist which is a sum of n exponentials with the last one different
+
+"""
+
+function hypo_exp_fit(scv::Float64)
+
+    scv ≥ 1.0 && error("SCV must be less than 1")
+
+    n = Int(ceil(1/scv))
+
+    ν1 = n/(1+sqrt((n-1)*(n*scv-1)))
+    ν2 = ν1*(n-1)/(ν1-1)
+
+    α = zeros(n)'
+    α[1] = 1
+    T = zeros(n,n)
+    T[1,1] = -ν1
+    T[1,2] = ν1
+
+    for i = 2:(n-1)
+        T[i,i] = -ν2
+        T[i,i+1] = ν2
+    end
+
+    T[n,n] = -ν2
+
+
+    return (α,T) 
+
+end
+
+ 
+
+"""
+
+Create an MAPHDist of dimensions pxq where q is the length of `probs`, `means`, and `scvs` and p is specified.
+
+This tries to do a best "moment fit" for the probability of absorbitions, means, and scvs
+
+"""
+
+function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::Vector{Float64})
+    q = length(probs)
+    length(means) != q && error("Dimension mismatch")
+    length(scvs) != q && error("Dimension mismatch")
+
+    πhat = sort(probs,rev = true)
+ 
+
+
+
+
+
+    #Compute effetive p
+    p = 4 #replace this QQQQ
+    dist = MAPHDist(p,q)
+
+    dist.α = QQQQ
+    dist.T = QQQQ
+    dist.T0 = QQQQ
+end
+
+
+# function MAPHInit(p::Int=1,q::Int=1)
+#     α = rand(p)
+#     α = (α/sum(α))'
+#     T = rand(1:0.01:20,p,p)
+#     T0 = rand(1:0.01:20,p,q)
+#     for i = 1:p
+#         temp = T[i,i]
+#         T[i,i]= -sum(T[i,:])-sum(T0[i,:])+temp
+#     end
+#     return MAPHDist(α,T,T0)
+# end
 
 # MAPHDist(;p::Int=1,q::Int=1) = MAPHInit(p::Int=1,q::Int=1)
 # MAPHDist(;p::Int=1,q::Int=1) = MAPHDist(
@@ -427,8 +522,7 @@ function test_example4()
 
     println("starting simulations")
     data = [rand(maph) for i in 1:10^2]
-    println("\nfinished simulations")
-
+    
 
     p,q = model_size(maph)
     est_maph = MAPHInit(p,q)
@@ -439,8 +533,11 @@ function test_example4()
         #Reason #1 (always) - to know p and q.
         #Reason #2 (sometimes) - to have a starting guess. QQQQ - later give it a flag to say 
     fit!(est_maph,data)
+    println("\nfinished simulations")
 end
 
-ss=test_example4()
+#ss=test_example4()
 
+a, T = hypo_exp_fit(0.23)
 
+@show T
