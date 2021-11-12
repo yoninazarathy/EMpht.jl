@@ -18,7 +18,7 @@ Returns parameters of a two phase hyper-exponential fitting a mean and an SCV
 
 """
 
-function hyper_exp_fit(scv::Float64)
+function hyper_exp_fit(πhat::Float64, mean::Float64, scv::Float64)
 
     scv < 1.0 && error("SCV must be greater than 1")
     μ1 = 1/(scv+1)
@@ -32,7 +32,7 @@ function hyper_exp_fit(scv::Float64)
     T[1,1] = -1/μ1
     T[2,2] = -(1-p)/(1-2*p)
 
-    return (α,T)
+    return (πhat*α,(1/mean)*T)
 
 end
 
@@ -44,7 +44,7 @@ Returns parameters of a hypo-exponential (generalized erlang) dist which is a su
 
 """
 
-function hypo_exp_fit(scv::Float64)
+function hypo_exp_fit(πhat::Float64,mean::Float64,scv::Float64)
 
     scv ≥ 1.0 && error("SCV must be less than 1")
 
@@ -66,8 +66,7 @@ function hypo_exp_fit(scv::Float64)
 
     T[n,n] = -ν2
 
-
-    return (α,T) 
+    return (πhat*α,(1/mean)*T) 
 
 end
 
@@ -86,20 +85,65 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
     length(means) != q && error("Dimension mismatch")
     length(scvs) != q && error("Dimension mismatch")
 
-    πhat = sort(probs,rev = true)
- 
+    sorted_πhat = sort(probs)
+    πhat_order = sortperm(probs)
+    sorted_scvs = scvs[πhat_order]
+    sorted_means = means[πhat_order]
+    num_phases = zeros(q)
+
+    for i = 1:q
+        if sorted_scvs[i] ≥ 1
+            num_phases[i] = 2
+        end
+        if sorted_scvs[i] <1
+            num_phases[i] = ceil(1/sorted_scvs[i])
+        end
+    end
+
+    required_phases = sum(num_phases)
+    effective_q_list = [required_phases - sum(num_phases[1:k])-p for k=1:q]
+    K=0
+
+    for i = 1:q
+        if effective_q_list[i]<0
+            K= i-1
+            break
+        end
+    end
+
+    scvs_required = sorted_scvs[K+1:q]
+    means_required = sorted_means[K+1:q]
+    πhat_required = sorted_πhat[K+1:q]
+
+
+    truncated_q = length(πhat_required)
+
+    @show (scvs_required,means,πhat_required)
+    dist = []
+    for k = 1:truncated_q
+        if scvs_required[k]≥1
+            push!(dist,hyper_exp_fit(πhat_required[k],means_required[k],scvs_required[k]))
+        end
+        if scvs_required[k]<1
+            push!(dist,hypo_exp_fit(πhat_required[k],means_required[k],scvs_required[k]))
+        end
+    end
+
+    @show(length(dist))
 
 
 
+    
 
 
     #Compute effetive p
-    p = 4 #replace this QQQQ
-    dist = MAPHDist(p,q)
-
-    dist.α = QQQQ
-    dist.T = QQQQ
-    dist.T0 = QQQQ
+    # p = 4 #replace this QQQQ
+    # dist = MAPHDist(p,q)
+    α = rand(p)
+    α = (α/sum(α))'
+    T = rand(1:0.01:20,p,p)
+    T0 = rand(1:0.01:20,p,q)
+    return MAPHDist(α,T,T0)
 end
 
 
@@ -538,6 +582,8 @@ end
 
 #ss=test_example4()
 
-a, T = hypo_exp_fit(0.23)
+# a, T = hypo_exp_fit(0.23)
 
-@show T
+# @show T
+
+MAPHDist(5,[0.2,0.5,0.3],[2.0,3.1,2.3],[1.1,0.27,2.0])
