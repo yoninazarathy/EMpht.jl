@@ -131,18 +131,9 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
 
     @show(length(dist))
 
-
-
-    
-
-
-    #Compute effetive p
-    # p = 4 #replace this QQQQ
-    # dist = MAPHDist(p,q)
-    α = rand(p)
-    α = (α/sum(α))'
-    T = rand(1:0.01:20,p,p)
-    T0 = rand(1:0.01:20,p,q)
+    α = zeros(p)'
+    T = zeros(p,p)
+    T0 = zerps(p,q)
     return MAPHDist(α,T,T0)
 end
 
