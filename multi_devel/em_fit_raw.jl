@@ -2,10 +2,6 @@ using LinearAlgebra, QuadGK, StatsBase, Distributions, Statistics
 import Base: rand, +, /, -
 import Distributions: cdf, ccdf
 
-
-
-
-
 mutable struct MAPHDist
     α::Adjoint{Float64, Vector{Float64}}
     T::Matrix{Float64}
@@ -14,12 +10,11 @@ end
 
 """
 
-Returns parameters of a two phase hyper-exponential fitting a mean and an SCV
+Returns parameters of a two phase hyper-exponential fitting a mean and an SCV.
 
 """
 
-function hyper_exp_fit(πhat::Float64, mean::Float64, scv::Float64)
-
+function hyper_exp_fit(mean::Float64, scv::Float64)
     scv < 1.0 && error("SCV must be greater than 1")
     μ1 = 1/(scv+1)
     p = (scv-1)/(scv+1+2/μ1^2-4/μ1)
@@ -32,8 +27,7 @@ function hyper_exp_fit(πhat::Float64, mean::Float64, scv::Float64)
     T[1,1] = -1/μ1
     T[2,2] = -(1-p)/(1-2*p)
 
-    return (πhat*α,(1/mean)*T)
-
+    return (α, (1/mean)*T)
 end
 
  
@@ -44,7 +38,7 @@ Returns parameters of a hypo-exponential (generalized erlang) dist which is a su
 
 """
 
-function hypo_exp_fit(πhat::Float64,mean::Float64,scv::Float64)
+function hypo_exp_fit(mean::Float64,scv::Float64)
 
     scv ≥ 1.0 && error("SCV must be less than 1")
 
@@ -66,7 +60,7 @@ function hypo_exp_fit(πhat::Float64,mean::Float64,scv::Float64)
 
     T[n,n] = -ν2
 
-    return (πhat*α,(1/mean)*T) 
+    return (α, (1/mean)*T) 
 
 end
 
@@ -79,29 +73,29 @@ Create an MAPHDist of dimensions pxq where q is the length of `probs`, `means`, 
 This tries to do a best "moment fit" for the probability of absorbitions, means, and scvs
 
 """
-
 function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::Vector{Float64})
     q = length(probs)
     length(means) != q && error("Dimension mismatch")
     length(scvs) != q && error("Dimension mismatch")
 
-    sorted_πhat = sort(probs)
     πhat_order = sortperm(probs)
+    sorted_πhat = probs[πhat_order]
     sorted_scvs = scvs[πhat_order]
     sorted_means = means[πhat_order]
-    num_phases = zeros(q)
+    # num_phases = zeros(q)
 
-    for i = 1:q
-        if sorted_scvs[i] ≥ 1
-            num_phases[i] = 2
-        end
-        if sorted_scvs[i] <1
-            num_phases[i] = ceil(1/sorted_scvs[i])
-        end
-    end
+    # for i = 1:q
+    #     if sorted_scvs[i] ≥ 1
+    #         num_phases[i] = 2
+    #     else # sorted_scvs[i] <1
+    #         num_phases[i] = ceil(1/sorted_scvs[i])
+    #     end
+    # end
+
+    num_phases = [sorted_scvs[i] ≥ 1 ? 2 : ceil(1/sorted_scvs[i]) for i in 1:q]
 
     required_phases = sum(num_phases)
-    effective_q_list = [required_phases - sum(num_phases[1:k])-p for k=1:q]
+    effective_q_list = [required_phases - sum(num_phases[1:k]) - p for k=1:q]
     K=0
 
     for i = 1:q
@@ -110,6 +104,8 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
             break
         end
     end
+
+    #QQQQ use findfirst.... with e.g.  findfirst((x)->x<0, effective_q_list)
 
     scvs_required = sorted_scvs[K+1:q]
     means_required = sorted_means[K+1:q]
