@@ -79,6 +79,8 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
     length(scvs) != q && error("Dimension mismatch")
 
     πhat_order = sortperm(probs)
+    reverse_order = sortperm(πhat_order)
+    @show reverse_order
     sorted_πhat = probs[πhat_order]
     sorted_scvs = scvs[πhat_order]
     sorted_means = means[πhat_order]
@@ -95,41 +97,52 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
     num_phases = [sorted_scvs[i] ≥ 1 ? 2 : ceil(1/sorted_scvs[i]) for i in 1:q]
 
     required_phases = sum(num_phases)
-    effective_q_list = [required_phases - sum(num_phases[1:k]) - p for k=1:q]
-    K=0
+    # selected_cases= [required_phases - sum(num_phases[1:k]) - p for k=1:q]
 
-    for i = 1:q
-        if effective_q_list[i]<0
-            K= i-1
-            break
-        end
-    end
+    
+    K = findfirst((x)->x ≤ p, [required_phases - sum(num_phases[1:k]) for k=1:q])
 
-    #QQQQ use findfirst.... with e.g.  findfirst((x)->x<0, effective_q_list)
-
+    @show K
     scvs_required = sorted_scvs[K+1:q]
     means_required = sorted_means[K+1:q]
     πhat_required = sorted_πhat[K+1:q]
 
-
     truncated_q = length(πhat_required)
 
-    @show (scvs_required,means,πhat_required)
+
     dist = []
-    for k = 1:truncated_q
-        if scvs_required[k]≥1
-            push!(dist,hyper_exp_fit(πhat_required[k],means_required[k],scvs_required[k]))
+    for k = 1:q
+        if sorted_scvs[k]≥1
+            push!(dist,hyper_exp_fit(sorted_means[k],sorted_scvs[k]))
         end
-        if scvs_required[k]<1
-            push!(dist,hypo_exp_fit(πhat_required[k],means_required[k],scvs_required[k]))
+        if sorted_scvs[k]<1
+            push!(dist,hypo_exp_fit(sorted_means[k],sorted_scvs[k]))
         end
     end
 
-    @show(length(dist))
+    for i = 1:K
+        dist[i] = (zeros(1,1),zeros(1,1))
+    end
 
-    α = zeros(p)'
-    T = zeros(p,p)
-    T0 = zerps(p,q)
+    
+    reversed_dist = dist[reverse_order]
+
+    reversed_α = (probs./sum(sorted_πhat[K+1:q])).*[reshape(reversed_dist[i][1],length(reversed_dist[i][1])) for i = 1:q]
+    α = reduce(vcat,reversed_α)'
+    
+    reversed_T = (probs./sum(sorted_πhat[K+1:q])).*[reversed_dist[i][2] for i = 1:q]
+
+    T = cat(reversed_T...,dims = (1,2))
+
+    reversed_T0 = (probs./sum(sorted_πhat[K+1:q])).*[sum(reversed_dist[i][2],dims=2) for i = 1:q]
+
+    T0 = cat(reversed_T0...,dims=(1,2))
+
+    display(α)
+
+    display(T)
+    display(T0)
+
     return MAPHDist(α,T,T0)
 end
 
@@ -552,7 +565,7 @@ function test_example4()
     maph = MAPHDist([0.5,0.5]', T_example, T0_example)
 
     println("starting simulations")
-    data = [rand(maph) for i in 1:10^2]
+    data = [rand(maph) for _ in 1:10^2]
     
 
     p,q = model_size(maph)
@@ -571,6 +584,7 @@ end
 
 # a, T = hypo_exp_fit(0.23)
 
+
 # @show T
 
-MAPHDist(5,[0.2,0.5,0.3],[2.0,3.1,2.3],[1.1,0.27,2.0])
+out = MAPHDist(15,[0.2,0.5,0.2,0.08,0.02],[2.0,3.1,2.3,4.5,0.2],[1.1,0.27,2.0,0.33,1.5])
