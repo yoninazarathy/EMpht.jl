@@ -14,6 +14,7 @@ Returns parameters of a two phase hyper-exponential fitting a mean and an SCV.
 
 """
 
+
 function hyper_exp_fit(mean::Float64, scv::Float64)
     scv < 1.0 && error("SCV must be greater than 1")
     μ1 = 1/(scv+1)
@@ -64,7 +65,10 @@ function hypo_exp_fit(mean::Float64,scv::Float64)
 
 end
 
- 
+
+function scv(data::Vector{Float64})
+    return (std(data)/mean(data))^2
+end 
 
 """
 
@@ -80,7 +84,6 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
 
     πhat_order = sortperm(probs)
     reverse_order = sortperm(πhat_order)
-    @show reverse_order
     sorted_πhat = probs[πhat_order]
     sorted_scvs = scvs[πhat_order]
     sorted_means = means[πhat_order]
@@ -102,12 +105,11 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
     
     K = findfirst((x)->x ≤ p, [required_phases - sum(num_phases[1:k]) for k=1:q])
 
-    @show K
-    scvs_required = sorted_scvs[K+1:q]
-    means_required = sorted_means[K+1:q]
-    πhat_required = sorted_πhat[K+1:q]
+    # scvs_required = sorted_scvs[K+1:q]
+    # means_required = sorted_means[K+1:q]
+    # πhat_required = sorted_πhat[K+1:q]
 
-    truncated_q = length(πhat_required)
+    # truncated_q = length(πhat_required)
 
 
     dist = []
@@ -121,7 +123,7 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
     end
 
     for i = 1:K
-        dist[i] = (zeros(1,1),zeros(1,1))
+        dist[i] = (ones(1,1),ones(1,1)).*eps()
     end
 
     
@@ -134,7 +136,7 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
 
     T = cat(reversed_T...,dims = (1,2))
 
-    reversed_T0 = (probs./sum(sorted_πhat[K+1:q])).*[sum(reversed_dist[i][2],dims=2) for i = 1:q]
+    reversed_T0 = -(probs./sum(sorted_πhat[K+1:q])).*[sum(reversed_dist[i][2],dims=2) for i = 1:q]
 
     T0 = cat(reversed_T0...,dims=(1,2))
 
@@ -258,7 +260,6 @@ function sufficient_stat_from_trajectory(d::MAPHDist, sojourn_times::Array{Float
 
 
 
-    #QQQQ do stuff
     return ss
 end
 
@@ -387,9 +388,7 @@ function fit!(maph::MAPHDist,data::MAPHObsData)::MAPHDist
             ss = ss+sufficient_stats(data[i],maph)
         end
         ss = ss/10^2
-        
-        display(ss.B)
-        maph = stats_to_dist(maph,ss)
+                maph = stats_to_dist(maph,ss)
 
     end
 
@@ -480,20 +479,20 @@ function test_example2()
     data = []
     full_trace =[]
     
-    println("starting simulations")
-    for i in 1:2*10^6
+    println("starting generating data")
+    for i in 1:2*10^4
         times, states = rand(maph, full_trace = true) 
         push!(full_trace, (times,states))
         push!(data, (observation_from_full_traj(times,states),i))
         i % 10^5 == 0 && print(".")
     end
-    println("\nfinished simulations")
+    println("\nfinished generating data")
 
     absorb = absorb_filter_data(data, maph)
     time_bin = time_filter_data(absorb[1], 1000)
 
     #loop over all bins
-    println("\n binning...")
+    println("\n start initialization...")
     for i in 1:length(time_bin)
         ss_i = MAPHSufficientStats[]
         for trace in full_trace[last.(time_bin[i])]
@@ -506,11 +505,28 @@ function test_example2()
             obs = first(data[last(last.(time_bin[i]))])
             computed_ss = sufficient_stats(obs, maph)
             errs_N = (mean_observed_ss.N - computed_ss.N) ./ computed_ss.N #./ computed_ss
-            @show (errs_N[2,4], length(ss_i))
             # @show obs
             # sufficient_stats()
         end
     end
+    
+    ab1 = filter(x->x.a==1,first.(data))
+    ab2 = filter(x->x.a==2,first.(data))
+    ab3 = filter(x->x.a==3,first.(data))
+    
+    probs = [length(ab1),length(ab2),length(ab3)]./length(data)
+    means = [mean(first.(ab1)),mean(first.(ab2)),mean(first.(ab3))]
+    scvs = [scv(first.(ab1)),scv(first.(ab2)),scv(first.(ab3))]
+
+    dist = MAPHDist(10,probs,means,scvs)
+    println("finish initialization")
+
+    println("starting simulations")
+    fit!(dist,first.(data))
+    println("\nfinished simulations")
+    
+    return dist
+
     # @show first(data)
     # # @show m[1]
     # @show maximum(data.y)
@@ -577,6 +593,7 @@ function test_example4()
         #Reason #1 (always) - to know p and q.
         #Reason #2 (sometimes) - to have a starting guess. QQQQ - later give it a flag to say 
     fit!(est_maph,data)
+
     println("\nfinished simulations")
 end
 
@@ -587,4 +604,7 @@ end
 
 # @show T
 
-out = MAPHDist(15,[0.2,0.5,0.2,0.08,0.02],[2.0,3.1,2.3,4.5,0.2],[1.1,0.27,2.0,0.33,1.5])
+out = test_example2()
+
+
+density(y::Float64,dd::MAPHDist) = -dd.α*inv(dd.T)*(1-exp(dd.T*y))*dd.T0
