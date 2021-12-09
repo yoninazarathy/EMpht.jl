@@ -100,11 +100,12 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
     num_phases = [sorted_scvs[i] ≥ 1 ? 2 : ceil(1/sorted_scvs[i]) for i in 1:q]
 
     required_phases = sum(num_phases)
+    @show required_phases
     # selected_cases= [required_phases - sum(num_phases[1:k]) - p for k=1:q]
 
     
-    K = findfirst((x)->x ≤ p, [required_phases - sum(num_phases[1:k]) for k=1:q])
-
+    K = findfirst((x)->x ≤ p, [required_phases - sum(num_phases[1:k]) for k=1:q])-1
+    @show K
     # scvs_required = sorted_scvs[K+1:q]
     # means_required = sorted_means[K+1:q]
     # πhat_required = sorted_πhat[K+1:q]
@@ -140,12 +141,21 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
 
     T0 = cat(reversed_T0...,dims=(1,2))
 
-    display(α)
+    maph = MAPHDist(α,T,T0)
 
-    display(T)
-    display(T0)
 
-    return MAPHDist(α,T,T0)
+    p_req, q_req = model_size(maph)
+
+    dummy_state_size = p-p_req
+    if dummy_state_size>0
+        maph.α = vcat(zeros(dummy_state_size),maph.α')'
+        maph.T = cat(ones(dummy_state_size,dummy_state_size).*eps(),maph.T,dims = (1,2))
+        maph.T0 = cat(ones(dummy_state_size,q).*eps(),maph.T0,dims=(1,1))
+    end
+
+
+
+    return maph
 end
 
 
@@ -604,7 +614,16 @@ end
 
 # @show T
 
-out = test_example2()
 
+function test_init()
+    out = MAPHDist(30,[0.2,0.5,0.2,0.08,0.02],[2.0,3.1,2.3,4.5,0.2],[1.1,0.27,2.0,0.33,1.5])
+    @show model_size(out)
+    data = [rand(out) for _ in 1:10^5]
+    pi_est = [count((x)->x.a == i, data)/length(data) for i in 1:5]
+    μ_est = [mean(first.(filter((x)->x.a == i, data))) for i in 1:5] 
+    @show pi_est
+    @show μ_est
+    return out
+end
 
-density(y::Float64,dd::MAPHDist) = -dd.α*inv(dd.T)*(1-exp(dd.T*y))*dd.T0
+maph = test_init()
