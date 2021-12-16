@@ -8,6 +8,8 @@ mutable struct MAPHDist
     T0::Matrix{Float64}
 end
 
+model_size(maph::MAPHDist) = (p = size(maph.T,1), q = size(maph.T0,2)) #transient is p and abosrbing is q
+
 """
 
 Returns parameters of a two phase hyper-exponential fitting a mean and an SCV.
@@ -71,6 +73,26 @@ function scv(data::Vector{Float64})
 end 
 
 """
+Merge PH distributions into a MAPH distribution 
+"""
+function Merge_Dist(probs::Vector{Float64},dist::Vector{Any})
+    merged_α = (probs./sum(probs)).*[reshape(dist[i][1],length(dist[i][1])) for i = 1:length(dist)]
+    α_temp = reduce(vcat,merged_α)'
+    merged_T = (probs./sum(probs)).*[dist[i][2] for i = 1:length(dist)]
+
+    T_temp = cat(merged_T...,dims = (1,2))
+
+    merged_T0 = -(probs./sum(probs)).*[sum(dist[i][2],dims=2) for i = 1:length(dist)]
+
+    T0_temp = cat(merged_T0...,dims=(1,2))
+
+    return α_temp, T_temp, T0_temp
+end
+
+
+
+
+"""
 
 Create an MAPHDist of dimensions pxq where q is the length of `probs`, `means`, and `scvs` and p is specified.
 
@@ -81,21 +103,12 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
     q = length(probs)
     length(means) != q && error("Dimension mismatch")
     length(scvs) != q && error("Dimension mismatch")
+   
 
     πhat_order = sortperm(probs)
-    reverse_order = sortperm(πhat_order)
     sorted_πhat = probs[πhat_order]
     sorted_scvs = scvs[πhat_order]
     sorted_means = means[πhat_order]
-    # num_phases = zeros(q)
-
-    # for i = 1:q
-    #     if sorted_scvs[i] ≥ 1
-    #         num_phases[i] = 2
-    #     else # sorted_scvs[i] <1
-    #         num_phases[i] = ceil(1/sorted_scvs[i])
-    #     end
-    # end
 
     num_phases = [sorted_scvs[i] ≥ 1 ? 2 : ceil(1/sorted_scvs[i]) for i in 1:q]
 
@@ -103,14 +116,17 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
     @show required_phases
     # selected_cases= [required_phases - sum(num_phases[1:k]) - p for k=1:q]
 
-    
-    K = findfirst((x)->x ≤ p, [required_phases - sum(num_phases[1:k]) for k=1:q])-1
-    @show K
-    # scvs_required = sorted_scvs[K+1:q]
-    # means_required = sorted_means[K+1:q]
-    # πhat_required = sorted_πhat[K+1:q]
+    K=0
 
-    # truncated_q = length(πhat_required)
+    K = findfirst((x)->x ≤ p, [sum(num_phases[k:end]) for k=1:q])
+    @show K
+    @show num_phases, πhat_order,[sum(num_phases[k:q]) for k=1:q]
+
+    K ∉ (1:q) && error("Not enough phases to start")
+
+    # α = zeros(p)'
+    # T = ones(p,p).*eps()
+    # T0 = ones(p,q).*eps() 
 
 
     dist = []
@@ -123,37 +139,58 @@ function MAPHDist(p::Int, probs::Vector{Float64}, means::Vector{Float64}, scvs::
         end
     end
 
-    for i = 1:K
-        dist[i] = (ones(1,1),ones(1,1)).*eps()
-    end
+    # if K>0
+    #     for i = 1:K
+    #         dist[i] = (ones(1,1),ones(1,1)).*eps()
+    #     end
+    # end
+    α = zeros(p)'
+    T = ones(p,p).*eps()
+    T0 = ones(p,q).*eps() 
+    @show typeof(dist)
 
+
+    reverse_order = sortperm(πhat_order)
     
     reversed_dist = dist[reverse_order]
 
-    reversed_α = (probs./sum(sorted_πhat[K+1:q])).*[reshape(reversed_dist[i][1],length(reversed_dist[i][1])) for i = 1:q]
-    α = reduce(vcat,reversed_α)'
+    # reversed_α = (probs./sum(probs)).*[reshape(reversed_dist[i][1],length(reversed_dist[i][1])) for i = 1:q]
+    # α_temp = reduce(vcat,reversed_α)'
     
-    reversed_T = (probs./sum(sorted_πhat[K+1:q])).*[reversed_dist[i][2] for i = 1:q]
+    # reversed_T = (probs./sum(probs)).*[reversed_dist[i][2] for i = 1:q]
 
-    T = cat(reversed_T...,dims = (1,2))
+    # T_temp = cat(reversed_T...,dims = (1,2))
 
-    reversed_T0 = -(probs./sum(sorted_πhat[K+1:q])).*[sum(reversed_dist[i][2],dims=2) for i = 1:q]
+    # reversed_T0 = -(probs./sum(probs)).*[sum(reversed_dist[i][2],dims=2) for i = 1:q]
 
-    T0 = cat(reversed_T0...,dims=(1,2))
-
-    maph = MAPHDist(α,T,T0)
+    # T0_temp = cat(reversed_T0...,dims=(1,2))
 
 
-    p_req, q_req = model_size(maph)
+    if p ≥ required_phases
+        α_temp, T_temp, T0_temp = Merge_Dist(probs,reversed_dist)
+        m,n = model_size(MAPHDist(α_temp, T_temp, T0_temp))
+        α[1:m] = α_temp
+        T[1:m,1:m] = T_temp
+        T0[1:m,1:n] = T0_temp
+    else
+        idx_drop = πhat_order[1:K-1]
+        @show idx_drop
+        probs = probs[eachindex(probs) .∉ Ref(idx_drop)]
+        reversed_dist = reversed_dist[eachindex(reversed_dist) .∉ Ref(idx_drop)]
+        α_temp, T_temp, T0_temp = Merge_Dist(probs,reversed_dist)
+        m,n = model_size(MAPHDist(α_temp, T_temp, T0_temp))
+        α[1:m] =α_temp
+        T[1:m,1:m] = T_temp
+        T0[1:m,1:n]=T0_temp
 
-    dummy_state_size = p-p_req
-    if dummy_state_size>0
-        maph.α = vcat(zeros(dummy_state_size),maph.α')'
-        maph.T = cat(ones(dummy_state_size,dummy_state_size).*eps(),maph.T,dims = (1,2))
-        maph.T0 = cat(ones(dummy_state_size,q).*eps(),maph.T0,dims=(1,1))
+
     end
 
 
+
+
+
+    maph = MAPHDist(α,T,T0)
 
     return maph
 end
@@ -275,7 +312,7 @@ end
 
 
 
-model_size(maph::MAPHDist) = (p = size(maph.T,1), q = size(maph.T0,2)) #transient is p and abosrbing is q
+# model_size(maph::MAPHDist) = (p = size(maph.T,1), q = size(maph.T0,2)) #transient is p and abosrbing is q
 
 SingleObs = NamedTuple{(:y, :a), Tuple{Float64, Int64}}
 MAPHObsData = Vector{SingleObs}
@@ -616,7 +653,7 @@ end
 
 
 function test_init()
-    out = MAPHDist(30,[0.2,0.5,0.2,0.08,0.02],[2.0,3.1,2.3,4.5,0.2],[1.1,0.27,2.0,0.33,1.5])
+    out = MAPHDist(4,[0.3,0.5,0.1,0.08,0.02],[2.0,3.1,2.3,4.5,0.2],[1.1,2.3,2.0,0.33,1.5])
     @show model_size(out)
     data = [rand(out) for _ in 1:10^5]
     pi_est = [count((x)->x.a == i, data)/length(data) for i in 1:5]
@@ -627,3 +664,5 @@ function test_init()
 end
 
 maph = test_init()
+
+@show model_size(maph)
